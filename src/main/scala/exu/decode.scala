@@ -7,6 +7,7 @@ package boom.exu
 
 import chisel3._
 import chisel3.util._
+import chisel3.dontTouch
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
@@ -593,6 +594,17 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
 
   io.deq.uop := uop
+  //Changes Cs 7290
+  //if instrcution is fence, increment version
+  val fence_counter = RegInit(0.U(32.W))
+  dontTouch(fence_counter)
+
+  uop.version := fence_counter
+
+  when (uop.is_fence){
+    fence_counter := fence_counter +1.U
+  }
+
 }
 
 /**

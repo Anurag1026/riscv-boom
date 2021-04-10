@@ -221,7 +221,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
 
   // If we got a mispredict, the tail will be misaligned for 1 extra cycle
-  assert (io.core.brupdate.b2.mispredict ||
+ assert (io.core.brupdate.b2.mispredict ||
           stq(stq_execute_head).valid ||
           stq_head === stq_execute_head ||
           stq_tail === stq_execute_head,
@@ -485,6 +485,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                  stq_incoming_idx(i) === stq_retry_idx).reduce(_||_))
                                ))
   // Can we commit a store
+  /*
   val can_fire_store_commit  = widthMap(w =>
                                ( stq_commit_e.valid                           &&
                                 !stq_commit_e.bits.uop.is_fence               &&
@@ -495,6 +496,50 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                                   stq_commit_e.bits.addr.valid      &&
                                                                  !stq_commit_e.bits.addr_is_virtual &&
                                                                   stq_commit_e.bits.data.valid))))
+*/
+//Changes 7290
+  val store_fire_vec = Wire(Vec(numStqEntries, Bool()))
+  val last_fired_store_version = RegInit(0.U)
+  for (i <- 0 until numStqEntries)
+  {
+      when (stq(i).valid && (
+      (stq(i).bits.committed || 
+      (stq(i).bits.uop.is_amo && 
+      stq(i).bits.addr.valid && 
+      !stq(i).bits.addr_is_virtual &&
+      stq(i).bits.data.valid
+      )) &&
+      !stq(i).bits.succeeded &&
+      !stq(i).bits.uop.is_fence &&
+      (io.dmem.ordered || (last_fired_store_version <= stq(i).bits.uop.version))))
+      {
+          store_fire_vec(i) := true.B                          
+      }.otherwise 
+      {
+          store_fire_vec(i) := false.B
+      }
+  }
+
+  
+val store_fire_bits = store_fire_vec.asUInt
+val shift_vec_left = Wire(UInt(numStqEntries.W))
+val shift_vec_right = Wire(UInt(numStqEntries.W))
+
+shift_vec_left := Fill(numStqEntries, 1.U(1.W)) << stq_head
+shift_vec_right := Fill(numStqEntries, 1.U(1.W)) >> (numStqEntries.asUInt-stq_head)
+val store_fire_bits_shifted = shift_vec_left | shift_vec_right
+
+
+ when (store_fire_bits_shifted.orR)
+ {
+   store_fire_idx := PriorityEncoder(store_fire_bits_shifted)
+}.otherwise
+{
+  store_fire_idx := PriorityEncoder(store_fire_bits)
+}
+  dontTouch(store_fire_idx)
+  val can_fire_store_commit = WireInit(false.B)
+  can_fire_store_commit := store_fire_bits.orR
 
   // Can we wakeup a load that was nack'd
   val block_load_wakeup = WireInit(false.B)
@@ -779,13 +824,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       assert(!ldq_retry_e.bits.executed)
     } .elsewhen (will_fire_store_commit(w)) {
       dmem_req(w).valid         := true.B
-      dmem_req(w).bits.addr     := stq_commit_e.bits.addr.bits
+      //changes CS 7290
+      //instead of stq_commit_e, use store_fire_idx
+      dmem_req(w).bits.addr     := stq(store_fire_idx).bits.addr.bits
       dmem_req(w).bits.data     := (new freechips.rocketchip.rocket.StoreGen(
-                                    stq_commit_e.bits.uop.mem_size, 0.U,
-                                    stq_commit_e.bits.data.bits,
+                                    stq(store_fire_idx).bits.uop.mem_size, 0.U,
+                                    stq(store_fire_idx).bits.data.bits,
                                     coreDataBytes)).data
-      dmem_req(w).bits.uop      := stq_commit_e.bits.uop
-
+      dmem_req(w).bits.uop      := stq(store_fire_idx).bits.uop
+      //does the execute head matter?
       stq_execute_head                     := Mux(dmem_req_fire(w),
                                                 WrapInc(stq_execute_head, numStqEntries),
                                                 stq_execute_head)
@@ -1493,12 +1540,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // store has been committed AND successfully sent data to memory
   when (stq(stq_head).valid && stq(stq_head).bits.committed)
   {
-    when (stq(stq_head).bits.uop.is_fence && !io.dmem.ordered) {
-      io.dmem.force_order := true.B
-      store_needs_order   := true.B
-    }
-    clear_store := Mux(stq(stq_head).bits.uop.is_fence, io.dmem.ordered,
-                                                        stq(stq_head).bits.succeeded)
+    //CS 7290 changes
+    //do we need to remove this now?
+    //when (stq(stq_head).bits.uop.is_fence && !io.dmem.ordered) {
+      //io.dmem.force_order := true.B
+      //store_needs_order   := true.B
+    //}
+    //clear_store := Mux(stq(stq_head).bits.uop.is_fence, io.dmem.ordered,
+     //                                                   stq(stq_head).bits.succeeded)
+    clear_store := stq(stq_head).bits.uop.is_fence || stq(stq_head).bits.succeeded
   }
 
   when (clear_store)
@@ -1684,21 +1734,21 @@ class ForwardingAgeLogic(num_entries: Int)(implicit p: Parameters) extends BoomM
    })
 
    // generating mask that zeroes out anything younger than tail
-   val age_mask = Wire(Vec(num_entries, Bool()))
+     
+ val age_mask = Wire(Vec(num_entries, Bool()))
    for (i <- 0 until num_entries)
-   {
-      age_mask(i) := true.B
-      when (i.U >= io.youngest_st_idx) // currently the tail points PAST last store, so use >=
-      {
-         age_mask(i) := false.B
-      }
-   }
-
-   // Priority encoder with moving tail: double length
-   val matches = Wire(UInt((2*num_entries).W))
-   matches := Cat(io.addr_matches & age_mask.asUInt,
-                  io.addr_matches)
-
+        {
+                age_mask(i) := true.B
+                when (i.U >= io.youngest_st_idx) // currently the tail points PAST last store, so use >=
+                      {
+                          age_mask(i) := false.B
+                      }
+                    }
+                                                
+      // Priority encoder with moving tail: double length
+      val matches = Wire(UInt((2*num_entries).W))
+      matches := Cat(io.addr_matches & age_mask.asUInt,
+      io.addr_matches)
    val found_match = Wire(Bool())
    found_match       := false.B
    io.forwarding_idx := 0.U
