@@ -221,7 +221,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
 
   // If we got a mispredict, the tail will be misaligned for 1 extra cycle
- assert (io.core.brupdate.b2.mispredict ||
+  assert (io.core.brupdate.b2.mispredict ||
           stq(stq_execute_head).valid ||
           stq_head === stq_execute_head ||
           stq_tail === stq_execute_head,
@@ -521,13 +521,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   }
 
   
-val store_fire_bits = store_fire_vec.asUInt
-val shift_vec_left = Wire(UInt(numStqEntries.W))
-val shift_vec_right = Wire(UInt(numStqEntries.W))
-
-shift_vec_left := Fill(numStqEntries, 1.U(1.W)) << stq_head
-shift_vec_right := Fill(numStqEntries, 1.U(1.W)) >> (numStqEntries.asUInt-stq_head)
-val store_fire_bits_shifted = shift_vec_left | shift_vec_right
+ val store_fire_bits = store_fire_vec.asUInt
+ val shift_vec_left = Wire(UInt(numStqEntries.W))
+ val shift_vec_right = Wire(UInt(numStqEntries.W))
+ shift_vec_left := Fill(numStqEntries, 1.U(1.W)) << stq_head
+ shift_vec_right := Fill(numStqEntries, 1.U(1.W)) >> (numStqEntries.asUInt - stq_head.asUInt)
+ val store_fire_bits_shifted = shift_vec_left | shift_vec_right
+ val store_fire_idx = Wire(UInt(log2Ceil(numStqEntries).W))
 
 
  when (store_fire_bits_shifted.orR)
@@ -833,11 +833,12 @@ val store_fire_bits_shifted = shift_vec_left | shift_vec_right
                                     coreDataBytes)).data
       dmem_req(w).bits.uop      := stq(store_fire_idx).bits.uop
       //does the execute head matter?
-      stq_execute_head                     := Mux(dmem_req_fire(w),
+      /*stq_execute_head                     := Mux(dmem_req_fire(w),
                                                 WrapInc(stq_execute_head, numStqEntries),
                                                 stq_execute_head)
-
-      stq(stq_execute_head).bits.succeeded := false.B
+*/
+      //change to store_fire_idx
+      stq(store_fire_idx).bits.succeeded := false.B
     } .elsewhen (will_fire_load_wakeup(w)) {
       dmem_req(w).valid      := true.B
       dmem_req(w).bits.addr  := ldq_wakeup_e.bits.addr.bits
@@ -877,6 +878,9 @@ val store_fire_bits_shifted = shift_vec_left | shift_vec_right
       dmem_req(w).bits.is_hella       := true.B
     }
 
+    when (stq(stq_execute_head).bits.succeeded){
+      stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
+    }
     //-------------------------------------------------------------
     // Write Addr into the LAQ/SAQ
     when (will_fire_load_incoming(w) || will_fire_load_retry(w))
@@ -1343,9 +1347,9 @@ val store_fire_bits_shifted = shift_vec_left | shift_vec_right
         .otherwise
       {
         assert(io.dmem.nack(w).bits.uop.uses_stq)
-        when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
+        /*when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
           stq_execute_head := io.dmem.nack(w).bits.uop.stq_idx
-        }
+        }*/
       }
     }
     // Handle the response

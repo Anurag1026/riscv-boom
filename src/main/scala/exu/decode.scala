@@ -241,7 +241,7 @@ object XDecode extends DecodeConstants
   WFI     -> List(Y, N, X, uopWFI   ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.I),
 
   FENCE_I -> List(Y, N, X, uopNOP  , IQT_INT, FU_X   , RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, Y, M_X  , 0.U, N, N, N, Y, Y, CSR.N),
-  FENCE   -> List(Y, N, X, uopFENCE, IQT_INT, FU_MEM , RT_X  , RT_X  , RT_X  , N, IS_X, N, Y, N, Y, N, M_X  , 0.U, N, N, N, Y, Y, CSR.N), // TODO PERF make fence higher performance
+  FENCE   -> List(Y, N, X, uopFENCE, IQT_INT, FU_MEM , RT_X  , RT_X  , RT_X  , N, IS_X, N, Y, N, Y, N, M_X  , 0.U, N, N, N, N, Y, CSR.N), // TODO PERF make fence higher performance
                                                                                                                                                        // currently serializes pipeline
 
            //                                                                  frs3_en                           wakeup_delay
