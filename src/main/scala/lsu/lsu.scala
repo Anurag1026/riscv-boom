@@ -53,7 +53,7 @@ import freechips.rocketchip.util.Str
 
 import boom.common._
 import boom.exu.{BrUpdateInfo, Exception, FuncUnitResp, CommitSignals, ExeUnitResp}
-import boom.util.{BoolToChar, AgePriorityEncoder, IsKilledByBranch, GetNewBrMask, WrapInc, IsOlder, UpdateBrMask}
+import boom.util.{BoolToChar, AgePriorityEncoder, IsKilledByBranch, GetNewBrMask, WrapInc, WrapAdd , IsOlder, UpdateBrMask}
 
 class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
 {
@@ -524,15 +524,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
  val store_fire_bits = store_fire_vec.asUInt
  val shift_vec_left = Wire(UInt(numStqEntries.W))
  val shift_vec_right = Wire(UInt(numStqEntries.W))
- shift_vec_left := Fill(numStqEntries, 1.U(1.W)) << stq_head
- shift_vec_right := Fill(numStqEntries, 1.U(1.W)) >> (numStqEntries.asUInt - stq_head.asUInt)
+ shift_vec_left := store_fire_bits >> stq_head
+ shift_vec_right := store_fire_bits << (numStqEntries.asUInt - stq_head.asUInt)
  val store_fire_bits_shifted = shift_vec_left | shift_vec_right
  val store_fire_idx = Wire(UInt(log2Ceil(numStqEntries).W))
 
 
  when (store_fire_bits_shifted.orR)
  {
-   store_fire_idx := PriorityEncoder(store_fire_bits_shifted)
+   store_fire_idx := WrapAdd(PriorityEncoder(store_fire_bits_shifted),stq_head.asUInt,numStqEntries)
 }.otherwise
 {
   store_fire_idx := PriorityEncoder(store_fire_bits)
@@ -1347,9 +1347,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         .otherwise
       {
         assert(io.dmem.nack(w).bits.uop.uses_stq)
-        /*when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
+        when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
           stq_execute_head := io.dmem.nack(w).bits.uop.stq_idx
-        }*/
+        }
       }
     }
     // Handle the response
