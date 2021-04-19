@@ -221,11 +221,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
 
   // If we got a mispredict, the tail will be misaligned for 1 extra cycle
-  assert (io.core.brupdate.b2.mispredict ||
+ /* assert (io.core.brupdate.b2.mispredict ||
           stq(stq_execute_head).valid ||
           stq_head === stq_execute_head ||
           stq_tail === stq_execute_head,
-            "stq_execute_head got off track.")
+            "stq_execute_head got off track.")*/
 
   val h_ready :: h_s1 :: h_s2 :: h_s2_nack :: h_wait :: h_replay :: h_dead :: Nil = Enum(7)
   // s1 : do TLB, if success and not killed, fire request go to h_s2
