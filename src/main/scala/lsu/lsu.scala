@@ -195,6 +195,7 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
   val addr_is_virtual     = Bool() // Virtual address, we got a TLB miss
   val data                = Valid(UInt(xLen.W))
 
+  val fired               = Bool() // D$ req sent
   val committed           = Bool() // committed by ROB
   val succeeded           = Bool() // D$ has ack'd this, we don't need to maintain this anymore
 
@@ -507,10 +508,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       (stq(i).bits.uop.is_amo && 
       stq(i).bits.addr.valid && 
       !stq(i).bits.addr_is_virtual &&
-      stq(i).bits.data.valid
-      )) &&
+      stq(i).bits.data.valid)) &&
       !stq(i).bits.succeeded &&
       !stq(i).bits.uop.is_fence &&
+      !stq(i).bits.fired &&
       (io.dmem.ordered || (last_fired_store_version <= stq(i).bits.uop.version))))
       {
           store_fire_vec(i) := true.B                          
@@ -519,24 +520,22 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           store_fire_vec(i) := false.B
       }
   }
-
   
- val store_fire_bits = store_fire_vec.asUInt
- val shift_vec_left = Wire(UInt(numStqEntries.W))
- val shift_vec_right = Wire(UInt(numStqEntries.W))
- shift_vec_left := store_fire_bits >> stq_head
- shift_vec_right := store_fire_bits << (numStqEntries.asUInt - stq_head.asUInt)
- val store_fire_bits_shifted = shift_vec_left | shift_vec_right
- val store_fire_idx = Wire(UInt(log2Ceil(numStqEntries).W))
+  val store_fire_bits = store_fire_vec.asUInt
+  val shift_vec_left  = Wire(UInt(numStqEntries.W))
+  val shift_vec_right = Wire(UInt(numStqEntries.W))
+  shift_vec_left  := store_fire_bits >> stq_head
+  shift_vec_right := store_fire_bits << (numStqEntries.asUInt - stq_head.asUInt)
+  val store_fire_bits_shifted = shift_vec_left | shift_vec_right
+  val store_fire_idx = Wire(UInt(log2Ceil(numStqEntries).W))
 
-
- when (store_fire_bits_shifted.orR)
- {
-   store_fire_idx := WrapAdd(PriorityEncoder(store_fire_bits_shifted),stq_head.asUInt,numStqEntries)
-}.otherwise
-{
-  store_fire_idx := PriorityEncoder(store_fire_bits)
-}
+  when (store_fire_bits_shifted.orR)
+  {
+    store_fire_idx := WrapAdd(PriorityEncoder(store_fire_bits_shifted),stq_head.asUInt,numStqEntries)
+  }.otherwise
+  {
+    store_fire_idx := PriorityEncoder(store_fire_bits)
+  }
   dontTouch(store_fire_idx)
   val can_fire_store_commit = WireInit(false.B)
   can_fire_store_commit := store_fire_bits.orR
@@ -839,6 +838,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 */
       //change to store_fire_idx
       stq(store_fire_idx).bits.succeeded := false.B
+      stq(store_fire_idx).bits.fired     := true.B
     } .elsewhen (will_fire_load_wakeup(w)) {
       dmem_req(w).valid      := true.B
       dmem_req(w).bits.addr  := ldq_wakeup_e.bits.addr.bits
@@ -1338,18 +1338,19 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         assert(hella_state === h_wait || hella_state === h_dead)
       }
-        .elsewhen (io.dmem.nack(w).bits.uop.uses_ldq)
+      .elsewhen (io.dmem.nack(w).bits.uop.uses_ldq)
       {
         assert(ldq(io.dmem.nack(w).bits.uop.ldq_idx).bits.executed)
         ldq(io.dmem.nack(w).bits.uop.ldq_idx).bits.executed  := false.B
         nacking_loads(io.dmem.nack(w).bits.uop.ldq_idx) := true.B
       }
-        .otherwise
+      .otherwise
       {
         assert(io.dmem.nack(w).bits.uop.uses_stq)
         when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
           stq_execute_head := io.dmem.nack(w).bits.uop.stq_idx
         }
+	stq(io.dmem.nack(w).bits.uop.stq_idx).bits.fired := false.B
       }
     }
     // Handle the response
