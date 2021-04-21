@@ -832,7 +832,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                 stq_execute_head)
 						*/
       //change to store_fire_idx
-      stq(store_fire_idx).bits.succeeded := false.B
       stq(store_fire_idx).bits.fired     := true.B
     } .elsewhen (will_fire_load_wakeup(w)) {
       dmem_req(w).valid      := true.B
