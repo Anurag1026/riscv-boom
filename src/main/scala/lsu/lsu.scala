@@ -503,22 +503,16 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val last_fired_store_version = RegInit(0.U)
   for (i <- 0 until numStqEntries)
   {
-      when (stq(i).valid && (
-      (stq(i).bits.committed || 
-      (stq(i).bits.uop.is_amo && 
-      stq(i).bits.addr.valid && 
-      !stq(i).bits.addr_is_virtual &&
-      stq(i).bits.data.valid)) &&
-      !stq(i).bits.succeeded &&
-      !stq(i).bits.uop.is_fence &&
-      !stq(i).bits.fired &&
-      (io.dmem.ordered || (last_fired_store_version <= stq(i).bits.uop.version))))
-      {
-          store_fire_vec(i) := true.B                          
-      }.otherwise 
-      {
-          store_fire_vec(i) := false.B
-      }
+    store_fire_vec(i) :=       ( stq(i).valid                                           &&
+                                !stq(i).bits.uop.is_fence                               &&
+                                !mem_xcpt_valid                                         &&
+                                !stq(i).bits.uop.exception                              &&
+                                (stq(i).bits.committed || ( stq(i).bits.uop.is_amo      &&
+                                                            stq(i).bits.addr.valid      &&
+                                                           !stq(i).bits.addr_is_virtual &&
+                                                            stq(i).bits.data.valid)     &&
+						           !stq(i).bits.fired           &&
+				last_fired_store_version <= stq(i).bits.uop.version))
   }
   
   val store_fire_bits = store_fire_vec.asUInt
@@ -537,8 +531,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     store_fire_idx := PriorityEncoder(store_fire_bits)
   }
   dontTouch(store_fire_idx)
-  val can_fire_store_commit = WireInit(false.B)
-  can_fire_store_commit := store_fire_bits.orR
+  val can_fire_store_commit = WireInit(widthMap(w => false.B))
+  can_fire_store_commit(0) := store_fire_bits.orR
 
   // Can we wakeup a load that was nack'd
   val block_load_wakeup = WireInit(false.B)
@@ -831,11 +825,12 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                     stq(store_fire_idx).bits.data.bits,
                                     coreDataBytes)).data
       dmem_req(w).bits.uop      := stq(store_fire_idx).bits.uop
+      /*
       //does the execute head matter?
-      /*stq_execute_head                     := Mux(dmem_req_fire(w),
+      stq_execute_head                     := Mux(dmem_req_fire(w),
                                                 WrapInc(stq_execute_head, numStqEntries),
                                                 stq_execute_head)
-*/
+						*/
       //change to store_fire_idx
       stq(store_fire_idx).bits.succeeded := false.B
       stq(store_fire_idx).bits.fired     := true.B
@@ -878,7 +873,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       dmem_req(w).bits.is_hella       := true.B
     }
 
-    when (stq(stq_execute_head).bits.succeeded){
+    when (stq(stq_execute_head).bits.fired){
       stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
     }
     //-------------------------------------------------------------
@@ -1462,6 +1457,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         stq(i).bits.addr.valid := false.B
         stq(i).bits.data.valid := false.B
         st_brkilled_mask(i)    := true.B
+	stq(i).bits.fired      := false.B
       }
     }
 
@@ -1559,6 +1555,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   when (clear_store)
   {
     stq(stq_head).valid           := false.B
+    stq(stq_head).bits.fired      := false.B
     stq(stq_head).bits.addr.valid := false.B
     stq(stq_head).bits.data.valid := false.B
     stq(stq_head).bits.succeeded  := false.B
