@@ -507,6 +507,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                 !stq(i).bits.uop.is_fence                               &&
                                 !mem_xcpt_valid                                         &&
                                 !stq(i).bits.uop.exception                              &&
+                                !stq(i).bits.succeeded                                  &&
                                 (stq(i).bits.committed || ( stq(i).bits.uop.is_amo      &&
                                                             stq(i).bits.addr.valid      &&
                                                            !stq(i).bits.addr_is_virtual &&
@@ -832,7 +833,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                 stq_execute_head)
 						*/
       //change to store_fire_idx
+      stq(store_fire_idx).bits.succeeded := false.B
       stq(store_fire_idx).bits.fired     := true.B
+      last_fired_store_version           := stq(store_fire_idx).bits.uop.version
     } .elsewhen (will_fire_load_wakeup(w)) {
       dmem_req(w).valid      := true.B
       dmem_req(w).bits.addr  := ldq_wakeup_e.bits.addr.bits
@@ -1345,6 +1348,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           stq_execute_head := io.dmem.nack(w).bits.uop.stq_idx
         }
 	stq(io.dmem.nack(w).bits.uop.stq_idx).bits.fired := false.B
+        last_fired_store_version := stq(io.dmem.nack(w).bits.uop.stq_idx).bits.uop.version
       }
     }
     // Handle the response
