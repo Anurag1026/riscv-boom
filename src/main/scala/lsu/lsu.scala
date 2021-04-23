@@ -279,7 +279,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       ldq(i).bits.st_dep_mask := ldq(i).bits.st_dep_mask & ~(1.U << stq_head)
     }
   }
-
+  val fence_counter = RegInit(0.U(32.W))
+  dontTouch(fence_counter)
+  val prev_inst = RegInit(0.U(32.W))
+  val prev_pc_lob = RegInit(0.U(32.W)) 
+ 
   // Decode stage
   var ld_enq_idx = ldq_tail
   var st_enq_idx = stq_tail
@@ -301,6 +305,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
     val dis_ld_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_ldq && !io.core.dis_uops(w).bits.exception
     val dis_st_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_stq && !io.core.dis_uops(w).bits.exception
+   
     when (dis_ld_val)
     {
       ldq(ld_enq_idx).valid                := true.B
@@ -317,6 +322,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
       assert (ld_enq_idx === io.core.dis_uops(w).bits.ldq_idx, "[lsu] mismatch enq load tag.")
       assert (!ldq(ld_enq_idx).valid, "[lsu] Enqueuing uop is overwriting ldq entries")
+      //asign version
+      ldq(ld_enq_idx).bits.uop.version := fence_counter
     }
       .elsewhen (dis_st_val)
     {
@@ -329,6 +336,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
       assert (st_enq_idx === io.core.dis_uops(w).bits.stq_idx, "[lsu] mismatch enq store tag.")
       assert (!stq(st_enq_idx).valid, "[lsu] Enqueuing uop is overwriting stq entries")
+
+      //assign version
+      stq(st_enq_idx).bits.uop.version := fence_counter
+      //increment store version 
+      when (stq(st_enq_idx).bits.uop.is_fence && stq(st_enq_idx).bits.uop.inst!=prev_inst && stq(st_enq_idx).bits.uop.pc_lob!=prev_pc_lob){
+      fence_counter := fence_counter +1.U
+      prev_inst := stq(st_enq_idx).bits.uop.inst
+      prev_pc_lob:= stq(st_enq_idx).bits.uop.pc_lob
+      }
     }
 
     ld_enq_idx = Mux(dis_ld_val, WrapInc(ld_enq_idx, numLdqEntries),
