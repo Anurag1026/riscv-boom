@@ -212,6 +212,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val stq = Reg(Vec(numStqEntries, Valid(new STQEntry)))
 
 
+  val min_store_version = Reg(UInt(32.W))
+  dontTouch(min_store_version)
 
   val ldq_head         = Reg(UInt(ldqAddrSz.W))
   val ldq_tail         = Reg(UInt(ldqAddrSz.W))
@@ -1513,10 +1515,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   var temp_stq_commit_head = stq_commit_head
   var temp_ldq_head        = ldq_head
+  min_store_version := stq(stq_head).bits.uop.version
   for (w <- 0 until coreWidth)
   {
     val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq
-    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
+    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq && ((ldq(temp_ldq_head).bits.uop.version <= min_store_version)|| !stq_nonempty)
     val idx = Mux(commit_store, temp_stq_commit_head, temp_ldq_head)
     when (commit_store)
     {
