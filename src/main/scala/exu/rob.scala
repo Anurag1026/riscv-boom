@@ -568,7 +568,7 @@ class Rob(
   io.com_xcpt.bits.is_rvc    := com_xcpt_uop.is_rvc
   io.com_xcpt.bits.pc_lob    := com_xcpt_uop.pc_lob
 
-  val flush_commit_mask = Range(0,coreWidth).map{i => io.commit.valids(i) && io.commit.uops(i).flush_on_commit}
+  val flush_commit_mask = Range(0,coreWidth).map{i => io.commit.valids(i) && (io.commit.uops(i).flush_on_commit && !io.commit.uops(i).is_fence)}
   val flush_commit = flush_commit_mask.reduce(_|_)
   val flush_val = exception_thrown || flush_commit
 

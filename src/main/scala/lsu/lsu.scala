@@ -285,7 +285,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   dontTouch(fence_counter)
   val prev_inst = RegInit(0.U(32.W))
   val prev_pc_lob = RegInit(0.U(32.W)) 
- 
+  val prev_stq_idx = RegInit(0.U(32.W))
   // Decode stage
   var ld_enq_idx = ldq_tail
   var st_enq_idx = stq_tail
@@ -342,10 +342,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       //assign version
       stq(st_enq_idx).bits.uop.version := fence_counter
       //increment store version 
-      when (stq(st_enq_idx).bits.uop.is_fence && stq(st_enq_idx).bits.uop.inst!=prev_inst && stq(st_enq_idx).bits.uop.pc_lob!=prev_pc_lob){
+      when (stq(st_enq_idx).bits.uop.is_fence && ((stq(st_enq_idx).bits.uop.inst!=prev_inst && stq(st_enq_idx).bits.uop.pc_lob!=prev_pc_lob) || (st_enq_idx != prev_stq_idx))){
       fence_counter := fence_counter +1.U
       prev_inst := stq(st_enq_idx).bits.uop.inst
       prev_pc_lob:= stq(st_enq_idx).bits.uop.pc_lob
+      prev_stq_idx := st_enq_idx
       }
     }
 
@@ -1474,6 +1475,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
       when (IsKilledByBranch(io.core.brupdate, stq(i).bits.uop))
       {
+
+        //version restore on branch mispredict
+        when(stq(i).bits.uop.is_fence){
+          fence_counter := stq(i).bits.uop.version
+        }
         stq(i).valid           := false.B
         stq(i).bits.addr.valid := false.B
         stq(i).bits.data.valid := false.B
