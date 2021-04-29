@@ -198,7 +198,7 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
   val fired               = Bool() // D$ req sent
   val committed           = Bool() // committed by ROB
   val succeeded           = Bool() // D$ has ack'd this, we don't need to maintain this anymore
-
+  //val nacked              = Bool() //was this entry nacked in the previous cycle
   val debug_wb_data       = UInt(xLen.W)
 }
 
@@ -221,7 +221,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val stq_tail         = Reg(UInt(stqAddrSz.W))
   val stq_commit_head  = Reg(UInt(stqAddrSz.W)) // point to next store to commit
   val stq_execute_head = Reg(UInt(stqAddrSz.W)) // point to next store to execute
-
 
   // If we got a mispredict, the tail will be misaligned for 1 extra cycle
  /* assert (io.core.brupdate.b2.mispredict ||
@@ -518,7 +517,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                                   stq_commit_e.bits.data.valid))))
 */
 //Changes 7290
+//
+//
   val store_fire_vec = Wire(Vec(numStqEntries, Bool()))
+  val store_fire_vec_nacked = Wire(Vec(numStqEntries, Bool()))
+  val nacked = Wire(Vec(numStqEntries, Bool()))
   val last_fired_store_version = RegInit(0.U)
   for (i <- 0 until numStqEntries)
   {
@@ -531,11 +534,21 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                             stq(i).bits.addr.valid      &&
                                                            !stq(i).bits.addr_is_virtual &&
                                                             stq(i).bits.data.valid)     &&
-						           !stq(i).bits.fired           &&
-				last_fired_store_version <= stq(i).bits.uop.version))
+                                   !stq(i).bits.fired           &&
+                last_fired_store_version <= stq(i).bits.uop.version))
+
+    store_fire_vec_nacked(i) := store_fire_vec(i) && ~nacked(i)
+    nacked(i) := false.B
   }
-  
-  val store_fire_bits = store_fire_vec.asUInt
+
+  val store_fire_bits = Wire(UInt(numStqEntries.W))
+  when(!store_fire_vec_nacked.asUInt.orR)
+  {
+    store_fire_bits := store_fire_vec.asUInt
+  }.otherwise{
+    store_fire_bits := store_fire_vec_nacked.asUInt
+  }
+
   val shift_vec_left  = Wire(UInt(numStqEntries.W))
   val shift_vec_right = Wire(UInt(numStqEntries.W))
   shift_vec_left  := store_fire_bits >> stq_head
@@ -1366,6 +1379,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
           stq_execute_head := io.dmem.nack(w).bits.uop.stq_idx
         }
+        //update nack idx
+        nacked(io.dmem.nack(w).bits.uop.stq_idx) := true.B
 	stq(io.dmem.nack(w).bits.uop.stq_idx).bits.fired := false.B
         last_fired_store_version := stq(io.dmem.nack(w).bits.uop.stq_idx).bits.uop.version
       }
